@@ -159,12 +159,20 @@ void Menu::UpdateElement() {
     menuThemeIndex = static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), defaultThemeIndex));
 }
 
+static ImGuiID SidebarEntryId(const std::string& label) {
+    return ImGui::GetID((label + "##Sidebar").c_str());
+}
+
+static ImGuiID HeaderEntryId(const std::string& label) {
+    return ImGui::GetID((label + "##Header").c_str());
+}
+
 bool ModernMenuSidebarEntry(std::string label) {
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec2 pos = window->DC.CursorPos;
-    const ImGuiID sidebarId = window->GetID(std::string(label + "##Sidebar").c_str());
+    const ImGuiID sidebarId = SidebarEntryId(label);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str(), ImGui::FindRenderedTextEnd(label.c_str()), true);
     pos.y += style.FramePadding.y;
     pos.x = window->WorkRect.GetCenter().x - labelSize.x / 2;
@@ -190,7 +198,7 @@ bool ModernMenuHeaderEntry(std::string label) {
     ImGuiWindow* window = g.CurrentWindow;
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec2 pos = window->DC.CursorPos;
-    const ImGuiID headerId = window->GetID(std::string(label + "##Header").c_str());
+    const ImGuiID headerId = HeaderEntryId(label);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str(), ImGui::FindRenderedTextEnd(label.c_str()), true);
     ImRect bb = { pos, pos + labelSize + style.FramePadding * 2 };
     ImGui::ItemSize(bb, style.FramePadding.y);
@@ -207,36 +215,30 @@ bool ModernMenuHeaderEntry(std::string label) {
     return pressed;
 }
 
+static bool NavGamepadEnabled() {
+    return ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad;
+}
+
 // With controller navigation the header and sidebar act like tab strips: moving along one selects the focused entry,
 // and moving into one from elsewhere lands on its selected entry instead of the nearest one.
 static ImGuiID navWindowLastFrame = 0;
 struct NavTabStrip {
-    ImGuiID selectedId = 0;
-    bool enteredOffSelection = false;
+    bool entered = false;
 
-    // Call after drawing each entry. Returns true when navigation should select it.
-    bool Selects(bool selected) {
+    // Construct right after the strip's BeginChild, so the redirect happens before any entry draws its highlight.
+    explicit NavTabStrip(ImGuiID selectedId) {
         ImGuiContext& g = *GImGui;
-        if (selected) {
-            selectedId = g.LastItemData.ID;
-            return false;
-        }
-        if (!(g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) || !ImGui::IsItemFocused()) {
-            return false;
-        }
-        if (navWindowLastFrame != g.CurrentWindow->ID) {
-            enteredOffSelection = true;
-            return false;
-        }
-        return true;
-    }
-
-    // Call after the last entry.
-    void End() {
-        if (enteredOffSelection && selectedId != 0) {
-            ImGui::SetFocusID(selectedId, GImGui->CurrentWindow);
+        entered = NavGamepadEnabled() && g.NavJustMovedToId != 0 && g.NavWindow == g.CurrentWindow &&
+                  navWindowLastFrame != g.CurrentWindow->ID;
+        if (entered) {
+            ImGui::SetFocusID(selectedId, g.CurrentWindow);
             ImGui::SetNavCursorVisible(true);
         }
+    }
+
+    // Call after drawing each entry. Returns true when navigation just moved onto it, so it should be selected.
+    bool Selects(bool selected) const {
+        return !entered && !selected && NavGamepadEnabled() && GImGui->NavJustMovedToId == GImGui->LastItemData.ID;
     }
 };
 
@@ -757,7 +759,7 @@ void Menu::DrawElement() {
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
-    NavTabStrip headerStrip;
+    NavTabStrip headerStrip(HeaderEntryId(menuEntries.at(headerIndex).label));
     uint8_t curIndex = 0;
     for (auto& label : menuOrder) {
         if (curIndex != 0) {
@@ -794,7 +796,6 @@ void Menu::DrawElement() {
         }
         curIndex++;
     }
-    headerStrip.End();
     if (sidebar == nullptr) { // headerIndex wasn't in menuOrder
         sidebar = &menuEntries.at(headerIndex).sidebars;
     }
@@ -900,7 +901,7 @@ void Menu::DrawElement() {
     ImGui::BeginChild((menuEntries.at(headerIndex).label + " Section").c_str(), { sidebarWidth, columnHeight * 3 },
                       ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar);
-    NavTabStrip sidebarStrip;
+    NavTabStrip sidebarStrip(SidebarEntryId(sectionIndex));
     for (auto& sidebarLabel : menuEntries.at(headerIndex).sidebarOrder) {
         std::string nextIndex = "";
         UIWidgets::PushStyleButton(menuThemeIndex);
@@ -923,7 +924,6 @@ void Menu::DrawElement() {
             sectionIndex = nextIndex;
         }
     }
-    sidebarStrip.End();
     ImGui::EndChild();
     ImGui::PopFont();
 
