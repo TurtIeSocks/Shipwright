@@ -868,7 +868,7 @@ void Menu::DrawElement() {
     }
     bool autoFocus = CVarGetInteger(CVAR_SETTING("Menu.SearchAutofocus"), 0);
     // Controller users start on the selected header with the cursor showing, instead of pressing the D-pad first.
-    bool navFocusOnOpen = ImGui::IsWindowAppearing() && CVarGetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0);
+    bool navFocusOnOpen = ImGui::IsWindowAppearing() && NavGamepadEnabled();
     ImGui::BeginChild("Header Selection", headerSelSize,
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
@@ -877,18 +877,21 @@ void Menu::DrawElement() {
     // tweak values slower/faster.
     const bool right = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR2, false);
     const bool left = ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL2, false);
-    const int bumper = right - left;
-    if (bumper != 0 && NavGamepadEnabled() && !ImGui::IsAnyItemActive() &&
+    const int tabStep = right - left;
+    auto selectHeader = [&](const std::string& label) {
+        if (headerSearch) {
+            menuSearch.Clear();
+        }
+        CVarSetString(headerCvar, label.c_str());
+        CVarSave();
+    };
+    if (tabStep != 0 && NavGamepadEnabled() && !ImGui::IsAnyItemActive() &&
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
         auto it = std::find(menuOrder.begin(), menuOrder.end(), headerIndex);
         if (it != menuOrder.end()) {
             const size_t count = menuOrder.size();
-            headerIndex = menuOrder.at((it - menuOrder.begin() + count + bumper) % count);
-            if (headerSearch) {
-                menuSearch.Clear();
-            }
-            CVarSetString(headerCvar, headerIndex.c_str());
-            CVarSave();
+            headerIndex = menuOrder.at((it - menuOrder.begin() + count + tabStep) % count);
+            selectHeader(headerIndex);
             NavFocus(HeaderEntryId(menuEntries.at(headerIndex).label));
         }
     }
@@ -910,11 +913,7 @@ void Menu::DrawElement() {
             ImGui::SetNavCursorVisibleAfterMove();
         }
         if (headerPressed || headerStrip.Selects(headerIndex == label)) {
-            if (headerSearch) {
-                menuSearch.Clear();
-            }
-            CVarSetString(headerCvar, label.c_str());
-            CVarSave();
+            selectHeader(label);
             nextIndex = label;
         }
         if (headerIndex != label) {
