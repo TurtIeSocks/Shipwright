@@ -276,8 +276,9 @@ static GatedOccluders CollectGatedOccluders() {
     GatedOccluders occluders;
     for (int i = 0; i < ACTORCAT_MAX; i++) {
         for (Actor* actor = gPlayState->actorCtx.actorLists[i].head; actor != nullptr; actor = actor->next) {
-            // A killed container (the pot an item just dropped from) stays listed until the next update.
-            if (actor->update == nullptr) {
+            // A killed container (the pot an item just dropped from) stays listed until the next update. An actor
+            // whose object is still loading hasn't run init, so its colliders aren't set up yet.
+            if (actor->update == nullptr || actor->init != nullptr) {
                 continue;
             }
             if (actor->id == ACTOR_EN_GOROIWA) {
