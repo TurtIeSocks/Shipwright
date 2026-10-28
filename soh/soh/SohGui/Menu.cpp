@@ -751,6 +751,8 @@ void Menu::DrawElement() {
         headerSelSize.y += style.ScrollbarSize;
     }
     bool autoFocus = CVarGetInteger(CVAR_SETTING("Menu.SearchAutofocus"), 0);
+    // Controller users start on the selected header with the cursor showing, instead of pressing the D-pad first.
+    bool navFocusOnOpen = ImGui::IsWindowAppearing() && CVarGetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0);
     ImGui::BeginChild("Header Selection", headerSelSize,
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
@@ -767,7 +769,12 @@ void Menu::DrawElement() {
         if (headerIndex != label) {
             ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
         }
-        if (ModernMenuHeaderEntry(entry.label) || headerStrip.Selects(headerIndex == label)) {
+        bool headerPressed = ModernMenuHeaderEntry(entry.label);
+        if (navFocusOnOpen && headerIndex == label) {
+            ImGui::SetItemDefaultFocus();
+            ImGui::SetNavCursorVisible(true);
+        }
+        if (headerPressed || headerStrip.Selects(headerIndex == label)) {
             if (headerSearch) {
                 menuSearch.Clear();
             }
