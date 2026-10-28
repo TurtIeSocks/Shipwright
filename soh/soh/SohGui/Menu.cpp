@@ -242,23 +242,23 @@ struct NavTabStrip {
     }
 };
 
-// Left/Right across the sidebar and content columns. ImGui only moves sideways onto items that line up with the
-// current one, so when nothing in the current area does, the move lands on the nearest widget in the next area over.
+// The sidebar and content columns form a row of areas. ImGui scores every area at once, so Up/Down could hop into a
+// neighbouring column, and Left/Right only reached items that lined up with the current one. Instead, Up/Down stays in
+// the current area, and Left/Right prefers the current row, then the nearest widget in the closest non-empty area.
 static std::vector<ImGuiID> navAreasLastFrame;
 class NavAreaRow {
   public:
     NavAreaRow() {
         ImGuiContext& g = *GImGui;
-        const bool sideways = g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right;
-        if (!NavGamepadEnabled() || !g.NavMoveScoringItems || !sideways || g.NavWindow == nullptr) {
+        if (!NavGamepadEnabled() || !g.NavMoveScoringItems || g.NavWindow == nullptr) {
             return;
         }
         for (size_t i = 0; i < navAreasLastFrame.size(); i++) {
             ImGuiWindow* area = ImGui::FindWindowByID(navAreasLastFrame[i]);
             if (area != nullptr && (area == g.NavWindow || ImGui::IsWindowChildOf(g.NavWindow, area, false, false))) {
-                const size_t next = g.NavMoveDir == ImGuiDir_Right ? i + 1 : i - 1;
                 current = area->ID;
-                target = next < navAreasLastFrame.size() ? navAreasLastFrame[next] : 0;
+                currentIndex = i;
+                direction = g.NavMoveDir == ImGuiDir_Right ? 1 : g.NavMoveDir == ImGuiDir_Left ? -1 : 0;
                 targetY = g.NavScoringRect.GetCenter().y;
                 break;
             }
@@ -269,22 +269,28 @@ class NavAreaRow {
     void BeginArea() {
         ImGuiContext& g = *GImGui;
         const ImGuiID id = g.CurrentWindow->ID;
+        const size_t index = areas.size();
         areas.push_back(id);
         if (current == 0 || id == current) {
             return;
         }
-        if (id == target) {
+        // Moving right, the first area with a candidate is the closest; moving left, the last one is.
+        const bool ahead = direction > 0 ? index > currentIndex : direction < 0 && index < currentIndex;
+        if (ahead && !(direction > 0 && chosen.ID != 0)) {
             // Every item lines up vertically, so ImGui's scoring picks the nearest item within each widget.
             inTarget = true;
             g.NavScoringRect.Min.y -= kLineUpAll;
             g.NavScoringRect.Max.y += kLineUpAll;
+            g.NavMoveResultOther.Clear();
+            best.Clear();
+            bestDist = FLT_MAX;
         } else {
             suppressed = true;
             g.NavMoveScoringItems = false;
         }
     }
 
-    // Draw one widget. In the target area, keep whichever widget sits nearest the current item's height.
+    // Draw one widget. In a target area, keep whichever widget sits nearest the current item's height.
     template <typename Draw> void Item(Draw&& draw) {
         if (!inTarget) {
             draw();
@@ -311,9 +317,12 @@ class NavAreaRow {
         if (inTarget) {
             g.NavScoringRect.Min.y += kLineUpAll;
             g.NavScoringRect.Max.y -= kLineUpAll;
-            if (best.ID != 0) {
-                g.NavMoveResultOther = best;
+            // Areas without Item() calls, like the sidebar, keep ImGui's own pick.
+            const ImGuiNavItemData& areaBest = best.ID != 0 ? best : g.NavMoveResultOther;
+            if (areaBest.ID != 0) {
+                chosen = areaBest;
             }
+            g.NavMoveResultOther = chosen;
             inTarget = false;
         }
         if (suppressed) {
@@ -331,12 +340,14 @@ class NavAreaRow {
     static constexpr float kLineUpAll = 100000.0f;
     std::vector<ImGuiID> areas;
     ImGuiID current = 0;
-    ImGuiID target = 0;
+    size_t currentIndex = 0;
+    int direction = 0;
     float targetY = 0.0f;
     bool inTarget = false;
     bool suppressed = false;
     ImGuiNavItemData best;
     float bestDist = FLT_MAX;
+    ImGuiNavItemData chosen;
 };
 
 uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
