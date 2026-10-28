@@ -219,6 +219,13 @@ static bool NavGamepadEnabled() {
     return ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad;
 }
 
+// Move navigation focus in code as if the D-pad had moved it: show the cursor and stop the mouse or last touch
+// from also highlighting whatever item sits under it.
+static void NavFocus(ImGuiID id) {
+    ImGui::SetFocusID(id, ImGui::GetCurrentWindow());
+    ImGui::SetNavCursorVisibleAfterMove();
+}
+
 // With controller navigation the header and sidebar act like tab strips: moving along one selects the focused entry,
 // and moving into one from elsewhere lands on its selected entry instead of the nearest one.
 static ImGuiID navWindowLastFrame = 0;
@@ -231,8 +238,7 @@ struct NavTabStrip {
         entered = NavGamepadEnabled() && g.NavJustMovedToId != 0 && g.NavWindow == g.CurrentWindow &&
                   navWindowLastFrame != g.CurrentWindow->ID;
         if (entered) {
-            ImGui::SetFocusID(selectedId, g.CurrentWindow);
-            ImGui::SetNavCursorVisible(true);
+            NavFocus(selectedId);
         }
     }
 
@@ -883,8 +889,7 @@ void Menu::DrawElement() {
             }
             CVarSetString(headerCvar, headerIndex.c_str());
             CVarSave();
-            ImGui::SetFocusID(HeaderEntryId(menuEntries.at(headerIndex).label), ImGui::GetCurrentWindow());
-            ImGui::SetNavCursorVisible(true);
+            NavFocus(HeaderEntryId(menuEntries.at(headerIndex).label));
         }
     }
     NavTabStrip headerStrip(HeaderEntryId(menuEntries.at(headerIndex).label));
@@ -902,7 +907,7 @@ void Menu::DrawElement() {
         bool headerPressed = ModernMenuHeaderEntry(entry.label);
         if (navFocusOnOpen && headerIndex == label) {
             ImGui::SetItemDefaultFocus();
-            ImGui::SetNavCursorVisible(true);
+            ImGui::SetNavCursorVisibleAfterMove();
         }
         if (headerPressed || headerStrip.Selects(headerIndex == label)) {
             if (headerSearch) {
