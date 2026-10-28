@@ -159,12 +159,20 @@ void Menu::UpdateElement() {
     menuThemeIndex = static_cast<UIWidgets::Colors>(CVarGetInteger(CVAR_SETTING("Menu.Theme"), defaultThemeIndex));
 }
 
+static ImGuiID SidebarEntryId(const std::string& label) {
+    return ImGui::GetID((label + "##Sidebar").c_str());
+}
+
+static ImGuiID HeaderEntryId(const std::string& label) {
+    return ImGui::GetID((label + "##Header").c_str());
+}
+
 bool ModernMenuSidebarEntry(std::string label) {
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec2 pos = window->DC.CursorPos;
-    const ImGuiID sidebarId = window->GetID(std::string(label + "##Sidebar").c_str());
+    const ImGuiID sidebarId = SidebarEntryId(label);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str(), ImGui::FindRenderedTextEnd(label.c_str()), true);
     pos.y += style.FramePadding.y;
     pos.x = window->WorkRect.GetCenter().x - labelSize.x / 2;
@@ -190,7 +198,7 @@ bool ModernMenuHeaderEntry(std::string label) {
     ImGuiWindow* window = g.CurrentWindow;
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec2 pos = window->DC.CursorPos;
-    const ImGuiID headerId = window->GetID(std::string(label + "##Header").c_str());
+    const ImGuiID headerId = HeaderEntryId(label);
     ImVec2 labelSize = ImGui::CalcTextSize(label.c_str(), ImGui::FindRenderedTextEnd(label.c_str()), true);
     ImRect bb = { pos, pos + labelSize + style.FramePadding * 2 };
     ImGui::ItemSize(bb, style.FramePadding.y);
@@ -207,37 +215,128 @@ bool ModernMenuHeaderEntry(std::string label) {
     return pressed;
 }
 
+static bool NavGamepadEnabled() {
+    return ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_NavEnableGamepad;
+}
+
 // With controller navigation the header and sidebar act like tab strips: moving along one selects the focused entry,
 // and moving into one from elsewhere lands on its selected entry instead of the nearest one.
 static ImGuiID navWindowLastFrame = 0;
 struct NavTabStrip {
-    ImGuiID selectedId = 0;
-    bool enteredOffSelection = false;
+    bool entered = false;
 
-    // Call after drawing each entry. Returns true when navigation should select it.
-    bool Selects(bool selected) {
+    // Construct right after the strip's BeginChild, so the redirect happens before any entry draws its highlight.
+    explicit NavTabStrip(ImGuiID selectedId) {
         ImGuiContext& g = *GImGui;
-        if (selected) {
-            selectedId = g.LastItemData.ID;
-            return false;
-        }
-        if (!(g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) || !ImGui::IsItemFocused()) {
-            return false;
-        }
-        if (navWindowLastFrame != g.CurrentWindow->ID) {
-            enteredOffSelection = true;
-            return false;
-        }
-        return true;
-    }
-
-    // Call after the last entry.
-    void End() {
-        if (enteredOffSelection && selectedId != 0) {
-            ImGui::SetFocusID(selectedId, GImGui->CurrentWindow);
+        entered = NavGamepadEnabled() && g.NavJustMovedToId != 0 && g.NavWindow == g.CurrentWindow &&
+                  navWindowLastFrame != g.CurrentWindow->ID;
+        if (entered) {
+            ImGui::SetFocusID(selectedId, g.CurrentWindow);
             ImGui::SetNavCursorVisible(true);
         }
     }
+
+    // Call after drawing each entry. Returns true when navigation just moved onto it, so it should be selected.
+    bool Selects(bool selected) const {
+        return !entered && !selected && NavGamepadEnabled() && GImGui->NavJustMovedToId == GImGui->LastItemData.ID;
+    }
+};
+
+// Left/Right across the sidebar and content columns. ImGui only moves sideways onto items that line up with the
+// current one, so when nothing in the current area does, the move lands on the nearest widget in the next area over.
+static std::vector<ImGuiID> navAreasLastFrame;
+class NavAreaRow {
+  public:
+    NavAreaRow() {
+        ImGuiContext& g = *GImGui;
+        const bool sideways = g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right;
+        if (!NavGamepadEnabled() || !g.NavMoveScoringItems || !sideways || g.NavWindow == nullptr) {
+            return;
+        }
+        for (size_t i = 0; i < navAreasLastFrame.size(); i++) {
+            ImGuiWindow* area = ImGui::FindWindowByID(navAreasLastFrame[i]);
+            if (area != nullptr && (area == g.NavWindow || ImGui::IsWindowChildOf(g.NavWindow, area, false, false))) {
+                const size_t next = g.NavMoveDir == ImGuiDir_Right ? i + 1 : i - 1;
+                current = area->ID;
+                target = next < navAreasLastFrame.size() ? navAreasLastFrame[next] : 0;
+                targetY = g.NavScoringRect.GetCenter().y;
+                break;
+            }
+        }
+    }
+
+    // Call right after each area's BeginChild.
+    void BeginArea() {
+        ImGuiContext& g = *GImGui;
+        const ImGuiID id = g.CurrentWindow->ID;
+        areas.push_back(id);
+        if (current == 0 || id == current) {
+            return;
+        }
+        if (id == target) {
+            // Every item lines up vertically, so ImGui's scoring picks the nearest item within each widget.
+            inTarget = true;
+            g.NavScoringRect.Min.y -= kLineUpAll;
+            g.NavScoringRect.Max.y += kLineUpAll;
+        } else {
+            suppressed = true;
+            g.NavMoveScoringItems = false;
+        }
+    }
+
+    // Draw one widget. In the target area, keep whichever widget sits nearest the current item's height.
+    template <typename Draw> void Item(Draw&& draw) {
+        if (!inTarget) {
+            draw();
+            return;
+        }
+        ImGuiContext& g = *GImGui;
+        ImGuiNavItemData saved = g.NavMoveResultOther;
+        g.NavMoveResultOther.Clear();
+        draw();
+        const ImGuiNavItemData& found = g.NavMoveResultOther;
+        if (found.ID != 0) {
+            const float dist = ImFabs(ImGui::WindowRectRelToAbs(found.Window, found.RectRel).GetCenter().y - targetY);
+            if (dist < bestDist) {
+                best = found;
+                bestDist = dist;
+            }
+        }
+        g.NavMoveResultOther = saved;
+    }
+
+    // Call right before each area's EndChild.
+    void EndArea() {
+        ImGuiContext& g = *GImGui;
+        if (inTarget) {
+            g.NavScoringRect.Min.y += kLineUpAll;
+            g.NavScoringRect.Max.y -= kLineUpAll;
+            if (best.ID != 0) {
+                g.NavMoveResultOther = best;
+            }
+            inTarget = false;
+        }
+        if (suppressed) {
+            g.NavMoveScoringItems = true;
+            suppressed = false;
+        }
+    }
+
+    // Call after the last area.
+    void End() {
+        navAreasLastFrame = areas;
+    }
+
+  private:
+    static constexpr float kLineUpAll = 100000.0f;
+    std::vector<ImGuiID> areas;
+    ImGuiID current = 0;
+    ImGuiID target = 0;
+    float targetY = 0.0f;
+    bool inTarget = false;
+    bool suppressed = false;
+    ImGuiNavItemData best;
+    float bestDist = FLT_MAX;
 };
 
 uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
@@ -757,7 +856,7 @@ void Menu::DrawElement() {
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
-    NavTabStrip headerStrip;
+    NavTabStrip headerStrip(HeaderEntryId(menuEntries.at(headerIndex).label));
     uint8_t curIndex = 0;
     for (auto& label : menuOrder) {
         if (curIndex != 0) {
@@ -794,7 +893,6 @@ void Menu::DrawElement() {
         }
         curIndex++;
     }
-    headerStrip.End();
     if (sidebar == nullptr) { // headerIndex wasn't in menuOrder
         sidebar = &menuEntries.at(headerIndex).sidebars;
     }
@@ -900,7 +998,9 @@ void Menu::DrawElement() {
     ImGui::BeginChild((menuEntries.at(headerIndex).label + " Section").c_str(), { sidebarWidth, columnHeight * 3 },
                       ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar);
-    NavTabStrip sidebarStrip;
+    NavAreaRow areaRow;
+    areaRow.BeginArea();
+    NavTabStrip sidebarStrip(SidebarEntryId(sectionIndex));
     for (auto& sidebarLabel : menuEntries.at(headerIndex).sidebarOrder) {
         std::string nextIndex = "";
         UIWidgets::PushStyleButton(menuThemeIndex);
@@ -923,7 +1023,7 @@ void Menu::DrawElement() {
             sectionIndex = nextIndex;
         }
     }
-    sidebarStrip.End();
+    areaRow.EndArea();
     ImGui::EndChild();
     ImGui::PopFont();
 
@@ -946,6 +1046,7 @@ void Menu::DrawElement() {
         ImGui::SetNextWindowSizeConstraints({ sectionWidth, 0 }, { sectionWidth, columnHeight });
         ImGui::BeginChild(sectionMenuId.c_str(), { sectionWidth, windowHeight * 4 },
                           ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoTitleBar);
+        areaRow.BeginArea();
     }
     if (headerSearch && menuSearchText.length() > 0) {
         ImGui::AlignTextToFramePadding();
@@ -984,13 +1085,15 @@ void Menu::DrawElement() {
                 ImGui::BeginChild(sectionId.c_str(), { columnWidth, windowHeight * 4 },
                                   ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened,
                                   ImGuiWindowFlags_NoTitleBar);
+                areaRow.BeginArea();
             }
             // for (auto& entryName : sidebar->at(sectionIndex).sidebarOrder) {
             for (auto& entry : sidebar->at(sectionIndex).columnWidgets.at(i)) {
-                MenuDrawItem(entry, menuThemeIndex);
+                areaRow.Item([&] { MenuDrawItem(entry, menuThemeIndex); });
             }
             //}
             if (useColumns) {
+                areaRow.EndArea();
                 ImGui::EndChild();
             }
             if (i < columns - 1) {
@@ -999,8 +1102,10 @@ void Menu::DrawElement() {
         }
     }
     if (!useColumns || menuSearchText.length() > 0) {
+        areaRow.EndArea();
         ImGui::EndChild();
     }
+    areaRow.End();
 
     if (!popout) {
         ImGui::PopStyleVar();
