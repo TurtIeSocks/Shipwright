@@ -579,6 +579,14 @@ typedef enum {
 
     // #### `result`
     // ```c
+    // true
+    // ```
+    // #### `args`
+    // - `*Actor` (the dying `EnDekubaba` or `EnKarebaba`)
+    VB_DEKU_BABA_DROP_STICK,
+
+    // #### `result`
+    // ```c
     // this->unk_860 != 0
     // ```
     // #### `args`

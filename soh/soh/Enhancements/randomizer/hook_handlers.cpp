@@ -1003,6 +1003,11 @@ static bool RandoCanTrackSwordless(PlayState* play) {
     return isSwordless && !wasSwordlessBefore && !RAND_GET_OPTION(RSK_SWORDLESS_EPONA_ITEMS);
 }
 
+// Sticks and nuts can't be carried until their shuffled bag is found.
+static bool MissingConsumableBag(RandomizerSettingKey shuffleBag, UpgradeType upgrade) {
+    return RAND_GET_OPTION(shuffleBag) && CUR_UPG_VALUE(upgrade) == 0;
+}
+
 void RandomizerOnVanillaBehaviorHandler(GIVanillaBehavior id, bool* should, va_list originalArgs) {
     va_list args;
     va_copy(args, originalArgs);
@@ -1058,6 +1063,12 @@ void RandomizerOnVanillaBehaviorHandler(GIVanillaBehavior id, bool* should, va_l
             // Allow Nabooru fight cutscene to play for child in rando
             if (entranceIndex == ENTR_SPIRIT_TEMPLE_BOSS_ENTRANCE) {
                 *should = true;
+            }
+            break;
+        }
+        case VB_DEKU_BABA_DROP_STICK: {
+            if (MissingConsumableBag(RSK_SHUFFLE_DEKU_STICK_BAG, UPG_STICKS)) {
+                *should = false;
             }
             break;
         }
@@ -2490,9 +2501,8 @@ void RandomizerOnActorInitHandler(void* actorRef) {
 
     // consumable bags
     if (actor->id == ACTOR_EN_ITEM00 &&
-        ((RAND_GET_OPTION(RSK_SHUFFLE_DEKU_STICK_BAG) && CUR_UPG_VALUE(UPG_STICKS) == 0 &&
-          actor->params == ITEM00_STICK) ||
-         (RAND_GET_OPTION(RSK_SHUFFLE_DEKU_NUT_BAG) && CUR_UPG_VALUE(UPG_NUTS) == 0 && actor->params == ITEM00_NUTS))) {
+        ((MissingConsumableBag(RSK_SHUFFLE_DEKU_STICK_BAG, UPG_STICKS) && actor->params == ITEM00_STICK) ||
+         (MissingConsumableBag(RSK_SHUFFLE_DEKU_NUT_BAG, UPG_NUTS) && actor->params == ITEM00_NUTS))) {
         Actor_Kill(actor);
     }
 

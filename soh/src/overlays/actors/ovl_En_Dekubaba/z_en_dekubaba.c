@@ -986,7 +986,11 @@ void EnDekubaba_PrunedSomersault(EnDekubaba* this, PlayState* play) {
         }
 
         func_800286CC(play, &this->actor.home.pos, &sZeroVec, &sZeroVec, this->size * 500.0f, this->size * 100.0f);
-        EnDekubaba_SetupDeadStickDrop(this, play);
+        if (GameInteractor_Should(VB_DEKU_BABA_DROP_STICK, true, this)) {
+            EnDekubaba_SetupDeadStickDrop(this, play);
+        } else {
+            Actor_Kill(&this->actor);
+        }
     }
 }
 
