@@ -567,6 +567,7 @@ static bool DecodeDList(std::shared_ptr<Ship::IResource> resource, DListDecodeSt
             // The decoder does not track matrices, so triangles after one would land in the wrong place.
             case G_MTX:
             case G_MTX_OTR:
+            case G_MTX_OTR_FILEPATH:
             case G_POPMTX:
                 return false;
             // Rectangles, framebuffer reads and interpolated tile sizes span a varying number of words, and none belong
