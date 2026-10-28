@@ -353,7 +353,11 @@ void EnKarebaba_Dying(EnKarebaba* this, PlayState* play) {
         }
 
         func_800286CC(play, &this->actor.home.pos, &zeroVec, &zeroVec, 500, 100);
-        EnKarebaba_SetupDeadItemDrop(this, play);
+        if (GameInteractor_Should(VB_DEKU_BABA_DROP_STICK, true, this)) {
+            EnKarebaba_SetupDeadItemDrop(this, play);
+        } else {
+            EnKarebaba_SetupDead(this);
+        }
     }
 }
 
