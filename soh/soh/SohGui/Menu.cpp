@@ -867,8 +867,11 @@ void Menu::DrawElement() {
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
-    // L/R switch header tabs. Skipped while a widget is active, since ImGui uses them to tweak values slower/faster.
-    const int bumper = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) - ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false);
+    // L/R (shoulders or triggers) switch header tabs. Skipped while a widget is active, since ImGui uses L1/R1 to
+    // tweak values slower/faster.
+    const bool right = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadR2, false);
+    const bool left = ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadL2, false);
+    const int bumper = right - left;
     if (bumper != 0 && NavGamepadEnabled() && !ImGui::IsAnyItemActive() &&
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
         auto it = std::find(menuOrder.begin(), menuOrder.end(), headerIndex);
