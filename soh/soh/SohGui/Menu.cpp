@@ -867,6 +867,23 @@ void Menu::DrawElement() {
                       ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
                           ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
+    // L/R switch header tabs. Skipped while a widget is active, since ImGui uses them to tweak values slower/faster.
+    const int bumper = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) - ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false);
+    if (bumper != 0 && NavGamepadEnabled() && !ImGui::IsAnyItemActive() &&
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        auto it = std::find(menuOrder.begin(), menuOrder.end(), headerIndex);
+        if (it != menuOrder.end()) {
+            const size_t count = menuOrder.size();
+            headerIndex = menuOrder.at((it - menuOrder.begin() + count + bumper) % count);
+            if (headerSearch) {
+                menuSearch.Clear();
+            }
+            CVarSetString(headerCvar, headerIndex.c_str());
+            CVarSave();
+            ImGui::SetFocusID(HeaderEntryId(menuEntries.at(headerIndex).label), ImGui::GetCurrentWindow());
+            ImGui::SetNavCursorVisible(true);
+        }
+    }
     NavTabStrip headerStrip(HeaderEntryId(menuEntries.at(headerIndex).label));
     uint8_t curIndex = 0;
     for (auto& label : menuOrder) {
