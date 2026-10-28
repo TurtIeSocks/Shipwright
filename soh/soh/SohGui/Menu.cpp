@@ -207,6 +207,39 @@ bool ModernMenuHeaderEntry(std::string label) {
     return pressed;
 }
 
+// With controller navigation the header and sidebar act like tab strips: moving along one selects the focused entry,
+// and moving into one from elsewhere lands on its selected entry instead of the nearest one.
+static ImGuiID navWindowLastFrame = 0;
+struct NavTabStrip {
+    ImGuiID selectedId = 0;
+    bool enteredOffSelection = false;
+
+    // Call after drawing each entry. Returns true when navigation should select it.
+    bool Selects(bool selected) {
+        ImGuiContext& g = *GImGui;
+        if (selected) {
+            selectedId = g.LastItemData.ID;
+            return false;
+        }
+        if (!(g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) || !ImGui::IsItemFocused()) {
+            return false;
+        }
+        if (navWindowLastFrame != g.CurrentWindow->ID) {
+            enteredOffSelection = true;
+            return false;
+        }
+        return true;
+    }
+
+    // Call after the last entry.
+    void End() {
+        if (enteredOffSelection && selectedId != 0) {
+            ImGui::SetFocusID(selectedId, GImGui->CurrentWindow);
+            ImGui::SetNavCursorVisible(true);
+        }
+    }
+};
+
 uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
     int searchCount = 0;
     std::transform(menuSearchText.begin(), menuSearchText.end(), menuSearchText.begin(), ::tolower);
@@ -214,7 +247,7 @@ uint32_t Menu::DrawSearchResults(std::string& menuSearchText) {
     ImGui::SetNextWindowSizeConstraints({ ImGui::GetContentRegionAvail().x / 2, 0 },
                                         { ImGui::GetContentRegionAvail().x / 2, ImGui::GetContentRegionAvail().y });
     if (ImGui::BeginChild("Search Results Col 1", { ImGui::GetContentRegionAvail().x / 2, 0 },
-                          ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoTitleBar)) {
+                          ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoTitleBar)) {
         for (auto& menuLabel : menuOrder) {
             auto& menuEntry = menuEntries.at(menuLabel);
             for (auto& sidebarLabel : menuEntry.sidebarOrder) {
@@ -700,7 +733,8 @@ void Menu::DrawElement() {
     pos += window->WorkRect.GetSize() / 2 - menuSize / 2;
     ImGui::SetNextWindowPos(pos);
     ImGui::BeginChild("Menu Block", menuSize,
-                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize,
+                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
+                          ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar);
 
     std::unordered_map<std::string, SidebarEntry>* sidebar = nullptr;
@@ -718,8 +752,10 @@ void Menu::DrawElement() {
     }
     bool autoFocus = CVarGetInteger(CVAR_SETTING("Menu.SearchAutofocus"), 0);
     ImGui::BeginChild("Header Selection", headerSelSize,
-                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize,
+                      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize |
+                          ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_HorizontalScrollbar);
+    NavTabStrip headerStrip;
     uint8_t curIndex = 0;
     for (auto& label : menuOrder) {
         if (curIndex != 0) {
@@ -731,7 +767,7 @@ void Menu::DrawElement() {
         if (headerIndex != label) {
             ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
         }
-        if (ModernMenuHeaderEntry(entry.label)) {
+        if (ModernMenuHeaderEntry(entry.label) || headerStrip.Selects(headerIndex == label)) {
             if (headerSearch) {
                 menuSearch.Clear();
             }
@@ -751,6 +787,7 @@ void Menu::DrawElement() {
         }
         curIndex++;
     }
+    headerStrip.End();
     if (sidebar == nullptr) { // headerIndex wasn't in menuOrder
         sidebar = &menuEntries.at(headerIndex).sidebars;
     }
@@ -854,14 +891,16 @@ void Menu::DrawElement() {
     float topY = pos.y;
     ImGui::SetNextWindowSizeConstraints({ sidebarWidth, 0 }, { sidebarWidth, columnHeight });
     ImGui::BeginChild((menuEntries.at(headerIndex).label + " Section").c_str(), { sidebarWidth, columnHeight * 3 },
-                      ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize, ImGuiWindowFlags_NoTitleBar);
+                      ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize | ImGuiChildFlags_NavFlattened,
+                      ImGuiWindowFlags_NoTitleBar);
+    NavTabStrip sidebarStrip;
     for (auto& sidebarLabel : menuEntries.at(headerIndex).sidebarOrder) {
         std::string nextIndex = "";
         UIWidgets::PushStyleButton(menuThemeIndex);
         if (sectionIndex != sidebarLabel) {
             ImGui::PushStyleColor(ImGuiCol_Button, { 0, 0, 0, 0 });
         }
-        if (ModernMenuSidebarEntry(sidebarLabel)) {
+        if (ModernMenuSidebarEntry(sidebarLabel) || sidebarStrip.Selects(sectionIndex == sidebarLabel)) {
             if (headerSearch) {
                 menuSearch.Clear();
             }
@@ -877,6 +916,7 @@ void Menu::DrawElement() {
             sectionIndex = nextIndex;
         }
     }
+    sidebarStrip.End();
     ImGui::EndChild();
     ImGui::PopFont();
 
@@ -897,8 +937,8 @@ void Menu::DrawElement() {
     if (!useColumns || (headerSearch && menuSearchText.length() > 0)) {
         ImGui::SameLine();
         ImGui::SetNextWindowSizeConstraints({ sectionWidth, 0 }, { sectionWidth, columnHeight });
-        ImGui::BeginChild(sectionMenuId.c_str(), { sectionWidth, windowHeight * 4 }, ImGuiChildFlags_AutoResizeY,
-                          ImGuiWindowFlags_NoTitleBar);
+        ImGui::BeginChild(sectionMenuId.c_str(), { sectionWidth, windowHeight * 4 },
+                          ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_NoTitleBar);
     }
     if (headerSearch && menuSearchText.length() > 0) {
         ImGui::AlignTextToFramePadding();
@@ -934,7 +974,8 @@ void Menu::DrawElement() {
             std::string sectionId = spdlog::fmt_lib::format("{} Column {}", sectionMenuId, i);
             if (useColumns) {
                 ImGui::SetNextWindowSizeConstraints({ columnWidth, 0 }, { columnWidth, columnHeight });
-                ImGui::BeginChild(sectionId.c_str(), { columnWidth, windowHeight * 4 }, ImGuiChildFlags_AutoResizeY,
+                ImGui::BeginChild(sectionId.c_str(), { columnWidth, windowHeight * 4 },
+                                  ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_NavFlattened,
                                   ImGuiWindowFlags_NoTitleBar);
             }
             // for (auto& entryName : sidebar->at(sectionIndex).sidebarOrder) {
@@ -965,6 +1006,7 @@ void Menu::DrawElement() {
     if (freshOpen) {
         freshOpen = false;
     }
+    navWindowLastFrame = g.NavWindow ? g.NavWindow->ID : 0;
     ImGui::End();
 }
 } // namespace Ship
