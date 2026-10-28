@@ -569,6 +569,19 @@ static bool DecodeDList(std::shared_ptr<Ship::IResource> resource, DListDecodeSt
             case G_MTX_OTR:
             case G_POPMTX:
                 return false;
+            // Rectangles, framebuffer reads and interpolated tile sizes span a varying number of words, and none belong
+            // in room or wall geometry.
+            case G_TEXRECT:
+            case G_TEXRECTFLIP:
+            case G_TEXRECT_WIDE:
+            case G_FILLWIDERECT:
+            case G_IMAGERECT:
+            case G_READFB:
+            case G_REGBLENDEDTEX:
+            case G_LOADBLOCK_WIDE:
+            case G_SETTILESIZE_INTERP:
+            case G_SETTILESIZE_LERP:
+                return false;
             case G_SETTIMG_OTR_HASH:
             case G_BRANCH_Z_OTR:
             case G_MARKER:
