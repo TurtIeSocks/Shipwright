@@ -446,6 +446,11 @@ static bool AddTriangle(DListDecodeState& state, uint32_t a, uint32_t b, uint32_
     return true;
 }
 
+// The interpreter skips a path command whose w1 is null or an N64 segment address rather than read it as a string.
+static bool IsPathPointer(uintptr_t w1) {
+    return w1 >= 0x10000 && (uint64_t)w1 <= 0x0000FFFFFFFFFFFFull;
+}
+
 // Walks a display list the way libultraship's F3DEX2 interpreter does, keeping vertex loads, triangles, calls and
 // the modes that decide whether a triangle is drawn opaque. Segmented addresses cannot be resolved here, so a command
 // that uses one fails the decode.
@@ -481,7 +486,7 @@ static bool DecodeDList(std::shared_ptr<Ship::IResource> resource, DListDecodeSt
                 break;
             }
             case G_VTX_OTR_FILEPATH: {
-                if (++i >= cmds.size()) {
+                if (++i >= cmds.size() || !IsPathPointer(w1)) {
                     return false;
                 }
                 VertexSpan vertices = GetVertices(ResourceLoad((const char*)w1));
@@ -522,6 +527,9 @@ static bool DecodeDList(std::shared_ptr<Ship::IResource> resource, DListDecodeSt
                     }
                     child = ResourceLoad(((uint64_t)cmds[i].words.w0 << 32) + cmds[i].words.w1);
                 } else {
+                    if (!IsPathPointer(w1)) {
+                        return false;
+                    }
                     child = ResourceLoad((const char*)w1);
                 }
                 if (!DecodeDList(child, state, depth + 1)) {
